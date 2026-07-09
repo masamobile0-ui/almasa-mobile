@@ -1580,88 +1580,20 @@
                 }
             }
 
-            // Splits a name into up to 2 lines that each fit within maxChars,
-            // breaking on spaces where possible. Hard-breaks a single very
-            // long word if needed, and ellipsizes as a last resort.
-            function wrapNameForLabel(name, maxChars) {
-                if (name.length <= maxChars) return [name];
-                const words = name.split(' ');
-                let line1 = '', line2 = '';
-                for (const word of words) {
-                    const candidate = line1 ? line1 + ' ' + word : word;
-                    if (candidate.length <= maxChars) { line1 = candidate;
-                        continue; }
-                    const candidate2 = line2 ? line2 + ' ' + word : word;
-                    if (candidate2.length <= maxChars) { line2 = candidate2;
-                        continue; }
-                    // word itself too long even alone — hard split
-                    if (!line1) line1 = word.slice(0, maxChars);
-                    else if (!line2) line2 = word.slice(0, maxChars);
-                }
-                if (!line1) line1 = name.slice(0, maxChars);
-                if (line2.length > maxChars) line2 = line2.slice(0, maxChars - 1) + '…';
-                return line2 ? [line1, line2] : [line1];
-            }
-
             // Builds raw TSPL for one barcode label. Label size/gap come from
             // settings (defaults 40×30mm, 2mm gap — common Xprinter roll size)
             // so Masa can tune it from ⚙️ الإعدادات without touching code.
-            // The product name is auto-sized/wrapped and centered so long
-            // names no longer get cut off at the edge of the label.
             function buildBarcodeTspl(item, count) {
                 const code = generateBarcode(item);
                 const w = DATA.settings.labelWidthMm || 40;
                 const h = DATA.settings.labelHeightMm || 30;
                 const gap = DATA.settings.labelGapMm != null ? DATA.settings.labelGapMm : 2;
                 const nameEsc = String(item.name || '').replace(/["\\]/g, '');
-
-                const dotsPerMm = 8; // 203dpi thermal printers (XP-365B и مشابه)
-                const marginX = 16;
-                const widthDots = Math.round(w * dotsPerMm);
-                const usableWidth = Math.max(40, widthDots - marginX * 2);
-
-                // font code -> {charW: approx dot width per char, lineH: line height}
-                const fontOptions = [
-                    { font: '3', charW: 16, lineH: 26 },
-                    { font: '2', charW: 12, lineH: 22 },
-                    { font: '1', charW: 8, lineH: 16 }
-                ];
-
-                let chosenFont = fontOptions[fontOptions.length - 1];
-                let lines = [nameEsc];
-                for (const opt of fontOptions) {
-                    const maxChars = Math.max(1, Math.floor(usableWidth / opt.charW));
-                    const maxCharsTwoLines = maxChars; // per-line cap when wrapped
-                    if (nameEsc.length <= maxChars) {
-                        chosenFont = opt;
-                        lines = [nameEsc];
-                        break;
-                    }
-                    const wrapped = wrapNameForLabel(nameEsc, maxCharsTwoLines);
-                    if (wrapped.length <= 2 && wrapped.every(l => l.length <= maxCharsTwoLines)) {
-                        chosenFont = opt;
-                        lines = wrapped;
-                        break;
-                    }
-                    // keep the smallest-font attempt as fallback in case nothing fits cleanly
-                    chosenFont = opt;
-                    lines = wrapNameForLabel(nameEsc, maxCharsTwoLines);
-                }
-
                 let tspl = `SIZE ${w} mm,${h} mm\r\nGAP ${gap} mm,0 mm\r\nDIRECTION 1\r\nCLS\r\n`;
-
-                let nameY = 8;
-                lines.forEach(line => {
-                    const lineWidthDots = line.length * chosenFont.charW;
-                    const x = marginX + Math.max(0, Math.floor((usableWidth - lineWidthDots) / 2));
-                    tspl += `TEXT ${x},${nameY},"${chosenFont.font}",0,1,1,"${line}"\r\n`;
-                    nameY += chosenFont.lineH;
-                });
-
-                const barcodeY = Math.max(nameY + 6, 40);
-                tspl += `BARCODE 16,${barcodeY},"128",50,1,0,2,2,"${code}"\r\n`;
+                tspl += `TEXT 16,10,"3",0,1,1,"${nameEsc}"\r\n`;
+                tspl += `BARCODE 16,45,"128",50,1,0,2,2,"${code}"\r\n`;
                 if (item.price) {
-                    tspl += `TEXT 16,${barcodeY + 65},"2",0,1,1,"${money(item.price)}"\r\n`;
+                    tspl += `TEXT 16,110,"2",0,1,1,"${money(item.price)}"\r\n`;
                 }
                 tspl += `PRINT 1,${Math.max(1, parseInt(count) || 1)}\r\n`;
                 return tspl;
@@ -2338,7 +2270,6 @@
                             ${isManager() ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
                                 <button class="btn btn-sm btn-ghost" data-inv-minus="${it.id}" style="flex:1;min-width:36px">−</button>
                                 <button class="btn btn-sm btn-ghost" data-inv-plus="${it.id}" style="flex:1;min-width:36px">+</button>
-                                <button class="btn btn-sm btn-ghost" data-inv-edit="${it.id}" style="flex:1;min-width:50px">✏️ تعديل</button>
                                 ${hasBarcode ? `<button class="btn btn-sm btn-primary" data-inv-print-dialog="${it.id}" style="flex:1;min-width:60px">🖨️ طباعة</button>` : `<button class="btn btn-sm btn-gold" data-inv-generate-barcode="${it.id}" style="flex:1;min-width:50px">➕🏷️</button>`}
                                 <button class="btn btn-sm btn-danger" data-inv-delete="${it.id}" style="flex:none;min-width:36px">🗑️</button>
                             </div>` : `<div style="font-size:10px;color:var(--text-faint);margin-top:4px">🔒 تعديل المخزون متاح للمدير فقط</div>`}
@@ -2501,14 +2432,6 @@
                             renderAll();
                             toast('🗑️ تم الحذف');
                         }
-                    };
-                });
-                document.querySelectorAll('[data-inv-edit]').forEach(el => {
-                    el.onclick = function(e) {
-                        if (!requireAuth('manager')) return;
-                        e.stopPropagation();
-                        const item = getInventoryItem(this.getAttribute('data-inv-edit'));
-                        if (item) openInventoryForm(null, item.id);
                     };
                 });
                 document.querySelectorAll('[data-inv-print-dialog]').forEach(el => {
@@ -3471,31 +3394,28 @@
             // ============================================================
             //  INVENTORY FORM
             // ============================================================
-            function openInventoryForm(presetBarcode, editId) {
+            function openInventoryForm(presetBarcode) {
                 if (!requireAuth('manager')) return;
-                const editItem = editId ? getInventoryItem(editId) : null;
-                const isEdit = !!editItem;
-
                 let html = `<div class="sheet-handle"></div><div class="sheet-head">
-                    <h3>${isEdit ? '✏️ تعديل صنف' : '➕ إضافة صنف'}</h3>
+                    <h3>➕ إضافة صنف</h3>
                     <button class="sheet-close" id="sheet-close">✕</button>
                 </div>
                 <form id="inv-form">
-                    <div class="field"><label>اسم الصنف *</label><input id="inv-name" required value="${esc(editItem ? editItem.name : '')}"></div>
-                    <div class="field"><label>القسم</label><input id="inv-type" list="cat-list" value="${esc(editItem ? (editItem.type || '') : '')}"><datalist id="cat-list">${['شاشات','بطاريات','جدلات','إكسسوارات','أخرى'].map(c => '<option value="'+c+'">').join('')}</datalist></div>
-                    <div class="field"><label>المورد</label><select id="inv-supplier"><option value="">بدون</option>${DATA.suppliers.map(s => '<option value="'+s.id+'"'+(editItem && editItem.supplierId===s.id?' selected':'')+'>'+esc(s.name)+'</option>').join('')}</select></div>
+                    <div class="field"><label>اسم الصنف *</label><input id="inv-name" required></div>
+                    <div class="field"><label>القسم</label><input id="inv-type" list="cat-list"><datalist id="cat-list">${['شاشات','بطاريات','جدلات','إكسسوارات','أخرى'].map(c => '<option value="'+c+'">').join('')}</datalist></div>
+                    <div class="field"><label>المورد</label><select id="inv-supplier"><option value="">بدون</option>${DATA.suppliers.map(s => '<option value="'+s.id+'">'+esc(s.name)+'</option>').join('')}</select></div>
                     <div class="field-row">
-                        <div class="field"><label>الكمية</label><input id="inv-qty" type="number" value="${editItem ? editItem.qty : 1}"></div>
-                        <div class="field"><label>السعر</label><input id="inv-price" type="number" value="${editItem ? (editItem.price || '') : ''}"></div>
+                        <div class="field"><label>الكمية</label><input id="inv-qty" type="number" value="1"></div>
+                        <div class="field"><label>السعر</label><input id="inv-price" type="number"></div>
                     </div>
-                    <div class="field"><label>حد التنبيه</label><input id="inv-min" type="number" value="${editItem ? (editItem.minQty || 3) : 3}"></div>
+                    <div class="field"><label>حد التنبيه</label><input id="inv-min" type="number" value="3"></div>
                     <div class="field"><label>الباركود</label>
                         <div style="display:flex;gap:6px">
-                            <input id="inv-barcode" placeholder="اتركه فارغاً للتوليد التلقائي" value="${esc(editItem ? (editItem.barcode || '') : (presetBarcode || ''))}" style="flex:1">
+                            <input id="inv-barcode" placeholder="اتركه فارغاً للتوليد التلقائي" value="${esc(presetBarcode || '')}" style="flex:1">
                             <button type="button" class="btn btn-sm btn-ghost" id="generate-barcode-btn" style="flex:none;padding:6px 12px">🎲 توليد</button>
                         </div>
                     </div>
-                    <div class="form-actions"><button type="submit" class="btn btn-primary">${isEdit ? '💾 حفظ التعديلات' : '➕ إضافة'}</button></div>
+                    <div class="form-actions"><button type="submit" class="btn btn-primary">➕ إضافة</button></div>
                 </form>`;
 
                 openSheet(html);
@@ -3517,32 +3437,17 @@
                     let barcode = document.getElementById('inv-barcode').value.trim();
                     if (!name) { toast('أدخل اسم الصنف'); return; }
                     if (!barcode) barcode = generateUniqueBarcode();
-                    if (DATA.inventory.some(x => x.barcode === barcode && (!isEdit || x.id !== editItem.id))) {
+                    if (DATA.inventory.some(x => x.barcode === barcode)) {
                         toast('⚠️ هذا الباركود مستخدم بالفعل');
                         return;
                     }
-                    if (isEdit) {
-                        editItem.name = name;
-                        editItem.type = type;
-                        editItem.qty = qty;
-                        editItem.price = price;
-                        editItem.minQty = minQty;
-                        editItem.supplierId = supplierId || '';
-                        editItem.barcode = barcode;
-                        editItem.updatedAt = Date.now();
-                        saveCollection('inventory', DATA.inventory);
-                        closeSheet();
-                        renderAll();
-                        toast('✅ تم حفظ التعديلات');
-                    } else {
-                        DATA.inventory.push({ id: uid(), name: name, type: type, qty: qty, price: price, minQty: minQty,
-                            supplierId: supplierId || '', barcode: barcode, createdAt: Date.now(), updatedAt: Date
-                                .now() });
-                        saveCollection('inventory', DATA.inventory);
-                        closeSheet();
-                        renderAll();
-                        toast('✅ تم إضافة الصنف مع باركود: ' + barcode);
-                    }
+                    DATA.inventory.push({ id: uid(), name: name, type: type, qty: qty, price: price, minQty: minQty,
+                        supplierId: supplierId || '', barcode: barcode, createdAt: Date.now(), updatedAt: Date
+                            .now() });
+                    saveCollection('inventory', DATA.inventory);
+                    closeSheet();
+                    renderAll();
+                    toast('✅ تم إضافة الصنف مع باركود: ' + barcode);
                 };
             }
 
@@ -3579,7 +3484,7 @@
                 </div>
                 <div style="padding:0 0 12px">
                     <div class="barcode-container" style="background:white;padding:12px;border-radius:10px;text-align:center;margin:6px 0">
-                        <div style="font-size:13px;font-weight:700;color:#000;margin-bottom:4px;text-align:center;white-space:normal;word-wrap:break-word;line-height:1.3">${esc(item.name)}</div>
+                        <div style="font-size:13px;font-weight:700;color:#000;margin-bottom:4px">${esc(item.name)}</div>
                         <svg id="barcode-preview-svg" style="max-width:100%"></svg>
                         ${item.price ? '<div style="font-size:11px;color:#000;margin-top:2px">'+money(item.price)+'</div>' : ''}
                         <div style="font-size:9px;color:#666;margin-top:2px;font-family:monospace">${code}</div>
@@ -3642,9 +3547,7 @@
                         'text-align:center;padding:8px;background:white;font-family:Arial,sans-serif;direction:ltr;border:1px solid #eee;border-radius:4px;';
 
                     const nameEl = document.createElement('div');
-                    const nameLen = String(item.name || '').length;
-                    const nameFontSize = nameLen > 28 ? '9px' : (nameLen > 18 ? '10px' : '11px');
-                    nameEl.style.cssText = `font-size:${nameFontSize};font-weight:700;color:#000;margin-bottom:2px;text-align:center;white-space:normal;word-wrap:break-word;line-height:1.25;`;
+                    nameEl.style.cssText = 'font-size:11px;font-weight:700;color:#000;margin-bottom:2px;';
                     nameEl.textContent = item.name;
                     box.appendChild(nameEl);
 
